@@ -52,9 +52,16 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
 				switch (message.command) {
 					case 'update':
 						// Update the document
-						const edit = new vscode.WorkspaceEdit();
-						edit.replace(document.uri, new vscode.Range(0, document.lineCount, 0, 0), message.content);
-						vscode.workspace.applyEdit(edit);
+						const currentText = document.getText();
+						if (message.content !== currentText) {
+							const fullRange = new vscode.Range(
+								document.positionAt(0),
+								document.positionAt(currentText.length)
+							);
+							const edit = new vscode.WorkspaceEdit();
+							edit.replace(document.uri, fullRange, message.content);
+							vscode.workspace.applyEdit(edit);
+						}
 						break;
 					case 'insertFraction':
 						const editor = vscode.window.activeTextEditor;
@@ -85,8 +92,8 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
         .input-area { flex: 1; padding: 10px; border: 1px solid #ccc; font-family: monospace; line-height: 2; }
         .render-area { flex: 1; padding: 10px; border: 1px solid #ccc; margin-top: 10px; overflow: auto; }
         .fraction { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 5px; }
-        .fraction .numerator, .fraction .denominator { border: none; outline: none; text-align: center; min-width: 20px; }
-        .fraction .line { width: 100%; height: 1px; background-color: black; margin: 2px 0; }
+        .fraction .numerator, .fraction .denominator { border: 1px solid var(--vscode-editor-foreground); outline: none; text-align: center; min-width: 20px; padding: 2px; cursor: text; background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+        .fraction .line { width: 100%; height: 1px; background-color: var(--vscode-editor-foreground); margin: 2px 0; }
         .fraction:focus-within { outline: 1px solid blue; }
     </style>
 </head>
@@ -114,9 +121,31 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
             }
         });
 
+        let updateTimeout;
         input.addEventListener('input', () => {
             renderMath();
-            vscode.postMessage({ command: 'update', content: getTextContent(input) });
+            clearTimeout(updateTimeout);
+            updateTimeout = setTimeout(() => {
+                vscode.postMessage({ command: 'update', content: getTextContent(input) });
+            }, 500);
+        });
+
+        input.addEventListener('click', (e) => {
+            if (e.target.closest('.fraction')) {
+                e.preventDefault();
+                const fraction = e.target.closest('.fraction');
+                let textNode = fraction.nextSibling;
+                if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
+                    textNode = document.createTextNode('\u00A0');
+                    fraction.parentNode.insertBefore(textNode, fraction.nextSibling);
+                }
+                const range = document.createRange();
+                range.setStart(textNode, textNode.length);
+                range.setEnd(textNode, textNode.length);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
         });
 
         input.addEventListener('keydown', (e) => {
@@ -134,7 +163,7 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
             const range = selection.getRangeAt(0);
             const fraction = document.createElement('span');
             fraction.className = 'fraction';
-            fraction.innerHTML = '<span class="numerator" contenteditable="true"> </span><span class="line"></span><span class="denominator" contenteditable="true"> </span>';
+            fraction.innerHTML = '<span class="numerator" contenteditable="true" tabindex="0"></span><span class="line"></span><span class="denominator" contenteditable="true" tabindex="0"></span>';
             range.deleteContents();
             range.insertNode(fraction);
             // Focus numerator
@@ -142,7 +171,7 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
             numerator.focus();
             const numRange = document.createRange();
             numRange.selectNodeContents(numerator);
-            numRange.collapse(false);
+            numRange.collapse(true);
             selection.removeAllRanges();
             selection.addRange(numRange);
         }
@@ -150,17 +179,24 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
         function moveToNextEditable() {
             const selection = window.getSelection();
             const current = selection.focusNode;
-            if (current.classList && current.classList.contains('numerator')) {
+            if (current && current.classList && current.classList.contains('numerator')) {
                 const denominator = current.parentElement.querySelector('.denominator');
                 denominator.focus();
-            } else if (current.classList && current.classList.contains('denominator')) {
-                // Move to next element
-                const next = current.parentElement.nextSibling || document.createElement('span');
-                next.textContent = ' ';
+                const denRange = document.createRange();
+                denRange.selectNodeContents(denominator);
+                denRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(denRange);
+            } else if (current && current.classList && current.classList.contains('denominator')) {
+                // Move after the fraction
+                const fraction = current.parentElement;
+                const textNode = document.createTextNode('\u00A0'); // non-breaking space
+                fraction.parentNode.insertBefore(textNode, fraction.nextSibling);
                 const range = document.createRange();
-                range.setStartAfter(current.parentElement);
-                range.insertNode(next);
-                next.focus();
+                range.setStart(textNode, 1);
+                range.setEnd(textNode, 1);
+                selection.removeAllRanges();
+                selection.addRange(range);
             }
         }
 
