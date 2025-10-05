@@ -130,24 +130,6 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
             }, 500);
         });
 
-        input.addEventListener('click', (e) => {
-            if (e.target.closest('.fraction')) {
-                e.preventDefault();
-                const fraction = e.target.closest('.fraction');
-                let textNode = fraction.nextSibling;
-                if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
-                    textNode = document.createTextNode('\u00A0');
-                    fraction.parentNode.insertBefore(textNode, fraction.nextSibling);
-                }
-                const range = document.createRange();
-                range.setStart(textNode, textNode.length);
-                range.setEnd(textNode, textNode.length);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-        });
-
         input.addEventListener('keydown', (e) => {
             if (e.key === '/') {
                 e.preventDefault();
