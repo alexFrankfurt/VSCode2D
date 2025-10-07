@@ -5,7 +5,16 @@ import * as vscode from 'vscode';
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+    
+    const output = vscode.window.createOutputChannel("1MyExtension");
+            output.appendLine("Extension activated2");
+    // Register a command that logs and shows the Output panel
+    const disposablef = vscode.commands.registerCommand("myext.showLog", () => {
+        output.appendLine(`[${new Date().toISOString()}] Command executed`);
+        output.show(true); // <-- brings the Output panel to the front
+    });
 
+    context.subscriptions.push(disposablef);
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "2d-math-input-extension" is now active!');
@@ -92,9 +101,83 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
         .input-area { flex: 1; padding: 10px; border: 1px solid #ccc; font-family: monospace; line-height: 2; }
         .render-area { flex: 1; padding: 10px; border: 1px solid #ccc; margin-top: 10px; overflow: auto; }
         .fraction { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 5px; }
-        .fraction .numerator, .fraction .denominator { border: 1px solid var(--vscode-editor-foreground); outline: none; text-align: center; min-width: 20px; padding: 2px; cursor: text; background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+        .fraction .numerator, .fraction .denominator { 
+            border: 1px solid var(--vscode-editor-foreground); 
+            outline: none; 
+            text-align: center; 
+            min-width: 40px;  /* Increased from 20px */
+            min-height: 30px; /* Added minimum height */
+            padding: 5px;     /* Increased from 2px */
+            cursor: text; 
+            background: var(--vscode-input-background); 
+            color: var(--vscode-input-foreground); 
+            font-size: 16px;  /* Increased font size for better visibility */
+        }
+        /* Hide border when there's content */
+        .fraction .numerator:not(:empty), 
+        .fraction .denominator:not(:empty) { 
+            border-color: transparent; 
+        }
         .fraction .line { width: 100%; height: 1px; background-color: var(--vscode-editor-foreground); margin: 2px 0; }
-        .fraction:focus-within { outline: 1px solid blue; }
+        .fraction:focus-within { outline: 2px solid blue; }
+        .continuation {
+            border: 1px solid var(--vscode-editor-foreground);
+            outline: none;
+            text-align: center;
+            min-width: 20px;
+            min-height: 30px;
+            padding: 5px;
+            cursor: text;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            white-space: pre;
+        }
+        .limit {
+            display: inline-flex;
+            align-items: baseline;
+            vertical-align: middle;
+            margin: 0 5px;
+        }
+        .lim-symbol {
+            font-style: normal;
+            margin-right: 2px;
+        }
+        .subscript {
+            border: 1px solid var(--vscode-editor-foreground);
+            outline: none;
+            text-align: center;
+            min-width: 40px;
+            min-height: 30px;
+            padding: 5px;
+            cursor: text;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            font-size: 16px;
+            vertical-align: sub;
+            font-size: smaller;
+        }
+        .subscript:not(:empty) {
+            border-color: transparent;
+        }
+        .expression {
+            border: 1px solid var(--vscode-editor-foreground);
+            outline: none;
+            text-align: center;
+            min-width: 40px;
+            min-height: 30px;
+            padding: 5px;
+            cursor: text;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            font-size: 16px;
+            margin-left: 5px;
+        }
+        .expression:not(:empty) {
+            border-color: transparent;
+        }
+        .limit:focus-within {
+            outline: 2px solid blue;
+        }
     </style>
 </head>
 <body>
@@ -122,7 +205,7 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
         });
 
         let updateTimeout;
-        input.addEventListener('input', () => {
+        input.addEventListener('input', (event) => {
             renderMath();
             clearTimeout(updateTimeout);
             updateTimeout = setTimeout(() => {
@@ -131,25 +214,149 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
         });
 
         input.addEventListener('keydown', (e) => {
+            console.log('keydown123', e);
             if (e.key === '/') {
-                e.preventDefault();
-                insertFraction();
-            } else if (e.key === 'Tab') {
-                e.preventDefault();
-                moveToNextEditable();
+                const text = input.textContent;
+                if (text.endsWith('lim')) {
+                    e.preventDefault();
+                    insertLimit();
+                } else {
+                    e.preventDefault();
+                    insertFraction();
+                }
             }
         });
+
+        // Add global keydown listener for Tab handling
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab' && document.activeElement && 
+                (document.activeElement.classList.contains('numerator') || 
+                 document.activeElement.classList.contains('denominator'))) {
+                e.preventDefault();
+                handleTabKey(e);
+            }
+        });
+
+        function handleTabKey(event) {
+            const activeElement = document.activeElement;
+
+            if (activeElement.classList.contains('numerator')) {
+                const fraction = activeElement.parentElement;
+                const denominator = fraction.querySelector('.denominator');
+                denominator.focus();
+                const denRange = document.createRange();
+                denRange.selectNodeContents(denominator);
+                denRange.collapse(false); // Move cursor to end
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(denRange);
+            } else if (activeElement.classList.contains('denominator')) {
+                // Move out of fraction to the right
+                const fraction = activeElement.parentElement;
+                const continuation = document.createElement('span');
+                continuation.contentEditable = 'true';
+                continuation.className = 'continuation';
+                continuation.textContent = '\u00A0'; // Non-breaking space
+                fraction.parentNode.insertBefore(continuation, fraction.nextSibling);
+
+                // Focus the continuation element
+                const contRange = document.createRange();
+                contRange.selectNodeContents(continuation);
+                contRange.collapse(false); // Move cursor to end
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(contRange);
+                continuation.focus();
+            } else if (activeElement.classList.contains('subscript')) {
+                const limit = activeElement.parentElement;
+                const expression = limit.querySelector('.expression');
+                expression.focus();
+                const exprRange = document.createRange();
+                exprRange.selectNodeContents(expression);
+                exprRange.collapse(false);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(exprRange);
+            } else if (activeElement.classList.contains('expression')) {
+                // Move out of limit to the right
+                const limit = activeElement.parentElement;
+                const continuation = document.createElement('span');
+                continuation.contentEditable = 'true';
+                continuation.className = 'continuation';
+                continuation.textContent = '\u00A0'; // Non-breaking space
+                limit.parentNode.insertBefore(continuation, limit.nextSibling);
+
+                // Focus the continuation element
+                const contRange = document.createRange();
+                contRange.selectNodeContents(continuation);
+                contRange.collapse(false); // Move cursor to end
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(contRange);
+                continuation.focus();
+            }
+        }
+
+        function handleKey(event) {
+            // Handle other keys, but not Tab (Tab is handled globally now)
+            if (event.key === 'c') {
+                event.preventDefault();
+                if (event.target.id.startsWith('numerator')) {
+                    event.target.parentElement.querySelector('[id^="denominator"]').focus();
+                } else if (event.target.id.startsWith('denominator')) {
+                    // Add continuation box after the fraction
+                    const fraction = event.target.parentElement;
+                    const continuation = document.createElement('span');
+                    continuation.contentEditable = 'true';
+                    continuation.className = 'continuation';
+                    continuation.textContent = '  ';
+                    continuation.addEventListener('input', (event) => {
+                        const span = event.target;
+                        const text = span.textContent;
+                        span.replaceWith(document.createTextNode(text));
+                    });
+                    fraction.parentNode.insertBefore(continuation, fraction.nextSibling);
+                    continuation.focus();
+                    const range = document.createRange();
+                    range.selectNodeContents(continuation);
+                    range.collapse(true);
+                    const selection = window.getSelection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+            }
+        }
 
         function insertFraction() {
             const selection = window.getSelection();
             const range = selection.getRangeAt(0);
             const fraction = document.createElement('span');
             fraction.className = 'fraction';
+            fraction.id = 'fraction-' + Date.now() + '-' + Math.random();
             fraction.innerHTML = '<span class="numerator" contenteditable="true" tabindex="0"></span><span class="line"></span><span class="denominator" contenteditable="true" tabindex="0"></span>';
             range.deleteContents();
             range.insertNode(fraction);
+            // Add continuation box after the fraction
+            const continuation = document.createElement('span');
+            continuation.contentEditable = 'true';
+            continuation.className = 'continuation';
+            continuation.textContent = '  ';
+            continuation.addEventListener('input', (event) => {
+                const span = event.target;
+                const text = span.textContent;
+                span.replaceWith(document.createTextNode(text));
+            });
+            fraction.parentNode.insertBefore(continuation, fraction.nextSibling);
             // Focus numerator
             const numerator = fraction.querySelector('.numerator');
+            numerator.id = 'numerator-' + fraction.id;
+            console.log('numerator', numerator);
+            const denominator = fraction.querySelector('.denominator');
+            denominator.id = 'denominator-' + fraction.id;
+
+            // Add event listeners for non-Tab keys
+            numerator.addEventListener('keyup', () => {console.log('keyup');});
+            denominator.addEventListener('keyup', () => {console.log('keyup');});
             numerator.focus();
             const numRange = document.createRange();
             numRange.selectNodeContents(numerator);
@@ -158,28 +365,33 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
             selection.addRange(numRange);
         }
 
-        function moveToNextEditable() {
+        function insertLimit() {
             const selection = window.getSelection();
-            const current = selection.focusNode;
-            if (current && current.classList && current.classList.contains('numerator')) {
-                const denominator = current.parentElement.querySelector('.denominator');
-                denominator.focus();
-                const denRange = document.createRange();
-                denRange.selectNodeContents(denominator);
-                denRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(denRange);
-            } else if (current && current.classList && current.classList.contains('denominator')) {
-                // Move after the fraction
-                const fraction = current.parentElement;
-                const textNode = document.createTextNode('\u00A0'); // non-breaking space
-                fraction.parentNode.insertBefore(textNode, fraction.nextSibling);
-                const range = document.createRange();
-                range.setStart(textNode, 1);
-                range.setEnd(textNode, 1);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
+            const range = selection.getRangeAt(0);
+            const limit = document.createElement('span');
+            limit.className = 'limit';
+            limit.innerHTML = '<span class="lim-symbol">lim</span><sub class="subscript" contenteditable="true" tabindex="0">x \\to -\\infty</sub><span class="expression" contenteditable="true" tabindex="0">\\frac{x}{2x-3}</span>';
+            range.deleteContents();
+            range.insertNode(limit);
+            // Add continuation box after the limit
+            const continuation = document.createElement('span');
+            continuation.contentEditable = 'true';
+            continuation.className = 'continuation';
+            continuation.textContent = '  ';
+            continuation.addEventListener('input', (event) => {
+                const span = event.target;
+                const text = span.textContent;
+                span.replaceWith(document.createTextNode(text));
+            });
+            limit.parentNode.insertBefore(continuation, limit.nextSibling);
+            // Focus subscript
+            const subscript = limit.querySelector('.subscript');
+            subscript.focus();
+            const subRange = document.createRange();
+            subRange.selectNodeContents(subscript);
+            subRange.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(subRange);
         }
 
         function renderMath() {
@@ -192,20 +404,32 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
         }
 
         function getTextContent(element) {
-            // Serialize fractions back to LaTeX
+            // Serialize fractions and limits back to LaTeX
             const cloned = element.cloneNode(true);
             const fractions = cloned.querySelectorAll('.fraction');
             fractions.forEach(f => {
-                const num = f.querySelector('.numerator').textContent.trim();
-                const den = f.querySelector('.denominator').textContent.trim();
+                const numEl = f.querySelector('.numerator');
+                const denEl = f.querySelector('.denominator');
+                const num = numEl ? numEl.textContent.trim() : '';
+                const den = denEl ? denEl.textContent.trim() : '';
                 f.replaceWith(\`\\\\frac{\${num}}{\${den}}\`);
+            });
+            const limits = cloned.querySelectorAll('.limit');
+            limits.forEach(l => {
+                const subEl = l.querySelector('.subscript');
+                const exprEl = l.querySelector('.expression');
+                const sub = subEl ? subEl.textContent.trim() : '';
+                const expr = exprEl ? exprEl.textContent.trim() : '';
+                l.replaceWith(\`\\\\lim_{\${sub}} \${expr}\`);
             });
             return cloned.textContent;
         }
 
         function setTextContent(element, text) {
-            // Parse LaTeX fractions and create elements
-            element.innerHTML = text.replace(/\\\\frac\{([^}]+)\}\{([^}]+)\}/g, '<span class="fraction"><span class="numerator" contenteditable="true">$1</span><span class="line"></span><span class="denominator" contenteditable="true">$2</span></span>');
+            // Parse LaTeX fractions and limits and create elements
+            element.innerHTML = text
+                .replace(/\\\\lim_\{([^}]+)\} (.+)/g, '<span class="limit"><span class="lim-symbol">lim</span><sub class="subscript" contenteditable="true">$1</sub><span class="expression" contenteditable="true">$2</span></span>')
+                .replace(/\\\\frac\{([^}]+)\}\{([^}]+)\}/g, '<span class="fraction"><span class="numerator" contenteditable="true">$1</span><span class="line"></span><span class="denominator" contenteditable="true">$2</span></span>');
         }
     </script>
 </body>
@@ -284,10 +508,10 @@ class FractionInputProvider implements vscode.WebviewViewProvider {
         function handleKey(event) {
             if (event.key === 'Tab') {
                 event.preventDefault();
-                if (event.target.id === 'numerator') {
-                    document.getElementById('denominator').focus();
-                } else if (event.target.id === 'denominator') {
-                    document.getElementById('numerator').focus();
+                if (event.target.id.startsWith('numerator')) {
+                    event.target.parentElement.querySelector('[id^="denominator"]').focus();
+                } else if (event.target.id.startsWith('denominator')) {
+                    event.target.parentElement.querySelector('[id^="numerator"]').focus();
                 }
             } else if (event.key === 'Enter') {
                 insertFraction();
