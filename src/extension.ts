@@ -1,15 +1,23 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+
+function log(message: string) {
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync('d:\\dev\\2dlog.log', `[${timestamp}] ${message}\n`);
+}
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+    log('Entering activate');
     
     const output = vscode.window.createOutputChannel("1MyExtension");
             output.appendLine("Extension activated2");
     // Register a command that logs and shows the Output panel
     const disposablef = vscode.commands.registerCommand("myext.showLog", () => {
+        log('Command myext.showLog executed');
         output.appendLine(`[${new Date().toISOString()}] Command executed`);
         output.show(true); // <-- brings the Output panel to the front
     });
@@ -26,8 +34,10 @@ export function activate(context: vscode.ExtensionContext) {
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
 	const disposable = vscode.commands.registerCommand('2d-math-input-extension.insertFraction', () => {
+		log('Command 2d-math-input-extension.insertFraction executed');
 		// Create a new untitled math file to open the custom editor
 		vscode.workspace.openTextDocument({ language: 'math', content: '' }).then(doc => {
+			log('Opened new math document');
 			vscode.window.showTextDocument(doc, { preview: false });
 		});
 	});
@@ -36,7 +46,9 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() {
+    log('Entering deactivate');
+}
 
 class MathEditorProvider implements vscode.CustomTextEditorProvider {
 	public resolveCustomTextEditor(
@@ -44,6 +56,7 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
 		webviewPanel: vscode.WebviewPanel,
 		_token: vscode.CancellationToken
 	): void | Thenable<void> {
+		log('Entering resolveCustomTextEditor');
 		// Setup initial content
 		webviewPanel.webview.options = {
 			enableScripts: true,
@@ -58,11 +71,14 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
 		// Handle messages from the webview
 		webviewPanel.webview.onDidReceiveMessage(
 			message => {
+				log('Received message from webview: ' + message.command);
 				switch (message.command) {
 					case 'update':
+						log('Handling case: update');
 						// Update the document
 						const currentText = document.getText();
 						if (message.content !== currentText) {
+							log('Content differs, updating document');
 							const fullRange = new vscode.Range(
 								document.positionAt(0),
 								document.positionAt(currentText.length)
@@ -70,16 +86,25 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
 							const edit = new vscode.WorkspaceEdit();
 							edit.replace(document.uri, fullRange, message.content);
 							vscode.workspace.applyEdit(edit);
+						} else {
+							log('Content is the same, no update needed');
 						}
 						break;
 					case 'insertFraction':
+						log('Handling case: insertFraction');
 						const editor = vscode.window.activeTextEditor;
 						if (editor) {
+							log('Active editor found, inserting fraction');
 							const fraction = `${message.numerator}/${message.denominator}`;
 							editor.edit(editBuilder => {
 								editBuilder.insert(editor.selection.active, fraction);
 							});
+						} else {
+							log('No active editor, cannot insert fraction');
 						}
+						break;
+					case 'log':
+						log(message.message);
 						break;
 				}
 			}
@@ -87,6 +112,7 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
 	}
 
 	private getHtmlForWebview(): string {
+		log('Entering getHtmlForWebview');
 		return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -198,6 +224,7 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
                 case 'update':
                     if (message.content !== getTextContent(input)) {
                         setTextContent(input, message.content);
+                        attachTabListeners(input);
                         renderMath();
                     }
                     break;
@@ -214,8 +241,11 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
         });
 
         input.addEventListener('keydown', (e) => {
-            console.log('keydown123', e);
-            if (e.key === '/') {
+            vscode.postMessage({ command: 'log', message: 'keydown: ' + e.key });
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                handleTabKey(e);
+            } else if (e.key === '/') {
                 const text = input.textContent;
                 if (text.endsWith('lim')) {
                     e.preventDefault();
@@ -224,77 +254,99 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
                     e.preventDefault();
                     insertFraction();
                 }
+            } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                // Check if typing in continuation and remove class
+                const selection = window.getSelection();
+                if (selection.rangeCount > 0) {
+                    const range = selection.getRangeAt(0);
+                    let element = range.commonAncestorContainer;
+                    if (element.nodeType === Node.TEXT_NODE) {
+                        element = element.parentElement;
+                    }
+                    while (element && element !== input) {
+                        if (element.classList.contains('continuation')) {
+                            element.classList.remove('continuation');
+                            break;
+                        }
+                        element = element.parentElement;
+                    }
+                }
             }
         });
 
-        // Add global keydown listener for Tab handling
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Tab' && document.activeElement && 
-                (document.activeElement.classList.contains('numerator') || 
-                 document.activeElement.classList.contains('denominator'))) {
-                e.preventDefault();
-                handleTabKey(e);
-            }
-        });
+        // Tab handling is now attached to individual elements
 
         function handleTabKey(event) {
-            const activeElement = document.activeElement;
-
-            if (activeElement.classList.contains('numerator')) {
-                const fraction = activeElement.parentElement;
-                const denominator = fraction.querySelector('.denominator');
-                denominator.focus();
-                const denRange = document.createRange();
-                denRange.selectNodeContents(denominator);
-                denRange.collapse(false); // Move cursor to end
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(denRange);
-            } else if (activeElement.classList.contains('denominator')) {
-                // Move out of fraction to the right
-                const fraction = activeElement.parentElement;
-                const continuation = document.createElement('span');
-                continuation.contentEditable = 'true';
-                continuation.className = 'continuation';
-                continuation.textContent = '\u00A0'; // Non-breaking space
-                fraction.parentNode.insertBefore(continuation, fraction.nextSibling);
-
-                // Focus the continuation element
-                const contRange = document.createRange();
-                contRange.selectNodeContents(continuation);
-                contRange.collapse(false); // Move cursor to end
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(contRange);
-                continuation.focus();
-            } else if (activeElement.classList.contains('subscript')) {
-                const limit = activeElement.parentElement;
-                const expression = limit.querySelector('.expression');
-                expression.focus();
-                const exprRange = document.createRange();
-                exprRange.selectNodeContents(expression);
-                exprRange.collapse(false);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(exprRange);
-            } else if (activeElement.classList.contains('expression')) {
-                // Move out of limit to the right
-                const limit = activeElement.parentElement;
-                const continuation = document.createElement('span');
-                continuation.contentEditable = 'true';
-                continuation.className = 'continuation';
-                continuation.textContent = '\u00A0'; // Non-breaking space
-                limit.parentNode.insertBefore(continuation, limit.nextSibling);
-
-                // Focus the continuation element
-                const contRange = document.createRange();
-                contRange.selectNodeContents(continuation);
-                contRange.collapse(false); // Move cursor to end
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(contRange);
-                continuation.focus();
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                let element = range.commonAncestorContainer;
+                if (element.nodeType === Node.TEXT_NODE) {
+                    element = element.parentElement;
+                }
+                while (element && element !== input) {
+                    if (element.classList.contains('numerator')) {
+                        vscode.postMessage({ command: 'log', message: 'tab in numerator, moving to denominator' });
+                        const fraction = element.parentElement;
+                        const denominator = fraction.querySelector('.denominator');
+                        const denRange = document.createRange();
+                        denRange.selectNodeContents(denominator);
+                        denRange.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(denRange);
+                        return;
+                    } else if (element.classList.contains('denominator')) {
+                        vscode.postMessage({ command: 'log', message: 'tab in denominator' });
+                        const fraction = element.parentElement;
+                        const continuation = document.createElement('span');
+                        continuation.contentEditable = 'true';
+                        continuation.className = 'continuation';
+                        continuation.innerHTML = '\u200B'; // zero-width space
+                        vscode.postMessage({ command: 'log', message: 'creating continuation for denominator' });
+                        continuation.addEventListener('input', () => {
+                            continuation.className = ''; // make it ordinary text when typing starts
+                        });
+                        fraction.parentNode.insertBefore(continuation, fraction.nextSibling);
+                        const contRange = document.createRange();
+                        contRange.selectNodeContents(continuation);
+                        contRange.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(contRange);
+                        return;
+                    } else if (element.classList.contains('subscript')) {
+                        vscode.postMessage({ command: 'log', message: 'tab in subscript, moving to expression' });
+                        const limit = element.parentElement;
+                        const expression = limit.querySelector('.expression');
+                        const exprRange = document.createRange();
+                        exprRange.selectNodeContents(expression);
+                        exprRange.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(exprRange);
+                        return;
+                    } else if (element.classList.contains('expression')) {
+                        vscode.postMessage({ command: 'log', message: 'tab in expression' });
+                        const limit = element.parentElement;
+                        const continuation = document.createElement('span');
+                        continuation.contentEditable = 'true';
+                        continuation.className = 'continuation';
+                        continuation.innerHTML = '\u200B'; // zero-width space
+                        vscode.postMessage({ command: 'log', message: 'creating continuation for expression' });
+                        continuation.addEventListener('input', () => {
+                            vscode.postMessage({ command: 'log', message: 'continuation input event' });
+                            continuation.className = ''; // make it ordinary text when typing starts
+                        });
+                        limit.parentNode.insertBefore(continuation, limit.nextSibling);
+                        const contRange = document.createRange();
+                        contRange.selectNodeContents(continuation);
+                        contRange.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(contRange);
+                        return;
+                    }
+                    element = element.parentElement;
+                }
             }
+            vscode.postMessage({ command: 'log', message: 'tab not handled' });
         }
 
         function handleKey(event) {
@@ -309,14 +361,11 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
                     const continuation = document.createElement('span');
                     continuation.contentEditable = 'true';
                     continuation.className = 'continuation';
-                    continuation.textContent = '  ';
-                    continuation.addEventListener('input', (event) => {
-                        const span = event.target;
-                        const text = span.textContent;
-                        span.replaceWith(document.createTextNode(text));
+                    continuation.textContent = '';
+                    continuation.addEventListener('input', () => {
+                        continuation.className = ''; // make it ordinary text when typing starts
                     });
                     fraction.parentNode.insertBefore(continuation, fraction.nextSibling);
-                    continuation.focus();
                     const range = document.createRange();
                     range.selectNodeContents(continuation);
                     range.collapse(true);
@@ -340,24 +389,32 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
             const continuation = document.createElement('span');
             continuation.contentEditable = 'true';
             continuation.className = 'continuation';
-            continuation.textContent = '  ';
-            continuation.addEventListener('input', (event) => {
-                const span = event.target;
-                const text = span.textContent;
-                span.replaceWith(document.createTextNode(text));
+            continuation.innerHTML = '\u200B';
+            continuation.addEventListener('input', () => {
+                continuation.className = ''; // make it ordinary text when typing starts
             });
-            fraction.parentNode.insertBefore(continuation, fraction.nextSibling);
             // Focus numerator
             const numerator = fraction.querySelector('.numerator');
             numerator.id = 'numerator-' + fraction.id;
-            console.log('numerator', numerator);
+            vscode.postMessage({ command: 'log', message: 'numerator created' });
             const denominator = fraction.querySelector('.denominator');
             denominator.id = 'denominator-' + fraction.id;
 
-            // Add event listeners for non-Tab keys
-            numerator.addEventListener('keyup', () => {console.log('keyup');});
-            denominator.addEventListener('keyup', () => {console.log('keyup');});
-            numerator.focus();
+            // Add event listeners for Tab key
+            numerator.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    vscode.postMessage({ command: 'log', message: 'tab pressed on numerator' });
+                    handleTabKey(e);
+                }
+            });
+            denominator.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    vscode.postMessage({ command: 'log', message: 'tab pressed on denominator' });
+                    handleTabKey(e);
+                }
+            });
             const numRange = document.createRange();
             numRange.selectNodeContents(numerator);
             numRange.collapse(true);
@@ -377,16 +434,36 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
             const continuation = document.createElement('span');
             continuation.contentEditable = 'true';
             continuation.className = 'continuation';
-            continuation.textContent = '  ';
-            continuation.addEventListener('input', (event) => {
-                const span = event.target;
-                const text = span.textContent;
-                span.replaceWith(document.createTextNode(text));
+            continuation.innerHTML = '\u200B';
+            continuation.addEventListener('keydown', (e) => {
+                if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                    e.preventDefault();
+                    const textNode = document.createTextNode(e.key);
+                    continuation.parentNode.replaceChild(textNode, continuation);
+                    const range = document.createRange();
+                    range.setStartAfter(textNode);
+                    range.setEndAfter(textNode);
+                    const selection = window.getSelection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
             });
-            limit.parentNode.insertBefore(continuation, limit.nextSibling);
-            // Focus subscript
+            // Add event listeners for Tab key
             const subscript = limit.querySelector('.subscript');
-            subscript.focus();
+            const expression = limit.querySelector('.expression');
+            subscript.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    handleTabKey(e);
+                }
+            });
+            expression.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    handleTabKey(e);
+                }
+            });
+            // Focus subscript
             const subRange = document.createRange();
             subRange.selectNodeContents(subscript);
             subRange.collapse(true);
@@ -431,6 +508,45 @@ class MathEditorProvider implements vscode.CustomTextEditorProvider {
                 .replace(/\\\\lim_\{([^}]+)\} (.+)/g, '<span class="limit"><span class="lim-symbol">lim</span><sub class="subscript" contenteditable="true">$1</sub><span class="expression" contenteditable="true">$2</span></span>')
                 .replace(/\\\\frac\{([^}]+)\}\{([^}]+)\}/g, '<span class="fraction"><span class="numerator" contenteditable="true">$1</span><span class="line"></span><span class="denominator" contenteditable="true">$2</span></span>');
         }
+
+        function attachTabListeners(element) {
+            const numerators = element.querySelectorAll('.numerator');
+            const denominators = element.querySelectorAll('.denominator');
+            const subscripts = element.querySelectorAll('.subscript');
+            const expressions = element.querySelectorAll('.expression');
+            numerators.forEach(el => {
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        handleTabKey(e);
+                    }
+                });
+            });
+            denominators.forEach(el => {
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        handleTabKey(e);
+                    }
+                });
+            });
+            subscripts.forEach(el => {
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        handleTabKey(e);
+                    }
+                });
+            });
+            expressions.forEach(el => {
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        handleTabKey(e);
+                    }
+                });
+            });
+        }
     </script>
 </body>
 </html>`;
@@ -449,6 +565,7 @@ class FractionInputProvider implements vscode.WebviewViewProvider {
 		context: vscode.WebviewViewResolveContext,
 		_token: vscode.CancellationToken,
 	) {
+		log('Entering resolveWebviewView');
 		this._view = webviewView;
 
 		webviewView.webview.options = {
@@ -460,14 +577,19 @@ class FractionInputProvider implements vscode.WebviewViewProvider {
 
 		webviewView.webview.onDidReceiveMessage(
 			message => {
+				log('Received message from webview view: ' + message.command);
 				switch (message.command) {
 					case 'insertFraction':
+						log('Handling case: insertFraction');
 						const editor = vscode.window.activeTextEditor;
 						if (editor) {
+							log('Active editor found, inserting fraction');
 							const fraction = `${message.numerator}/${message.denominator}`;
 							editor.edit(editBuilder => {
 								editBuilder.insert(editor.selection.active, fraction);
 							});
+						} else {
+							log('No active editor, cannot insert fraction');
 						}
 						// Clear the inputs after insertion
 						webviewView.webview.postMessage({ command: 'clear' });
@@ -480,6 +602,7 @@ class FractionInputProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _getHtmlForWebview(webview: vscode.Webview) {
+		log('Entering _getHtmlForWebview');
 		return `<!DOCTYPE html>
 <html lang="en">
 <head>
